@@ -18,6 +18,16 @@ const mainInterface = $("#main-interface");
 const autoDownloadToggle = $("#autoDownloadToggle");
 let autoSequentialEnabled = false;
 
+// Upload prompt & ảnh
+const uploadBtn = $("#uploadPromptButton");
+const fileInput = $("#fileInput");
+
+const imageUploadBtn = $("#uploadImageButton");
+const imageInput = $("#imageInput");
+const imageUploadStatus = $("#imageUploadStatus");
+
+// Danh sách ảnh đã chọn (File[])
+let imageFiles = [];
 
 let stopRequested = false;
 
@@ -76,7 +86,9 @@ async function checkRightPageAndToggleUI() {
   mainInterface.style.display = onFlow ? "flex" : "none";
 }
 
-navigateBtn?.addEventListener("click", () => chrome.tabs.create({ url: "https://labs.google/fx/" }));
+navigateBtn?.addEventListener("click", () =>
+  chrome.tabs.create({ url: "https://labs.google/fx/" })
+);
 chrome.tabs.onActivated.addListener(checkRightPageAndToggleUI);
 chrome.tabs.onUpdated.addListener((_id, info) => {
   if (info.status === "complete" || info.url) checkRightPageAndToggleUI();
@@ -102,7 +114,10 @@ function initPromptStatus(lines, startIndex0) {
   doneCount = 0;
   failedCount = 0;
   updateLiveStatus();
-  logMessage(`📚 Tổng số prompt: ${lines.length}. Bắt đầu từ prompt #${startIndex0 + 1}.`, "system");
+  logMessage(
+    `📚 Tổng số prompt: ${lines.length}. Bắt đầu từ prompt #${startIndex0 + 1}.`,
+    "system"
+  );
 }
 function markRunning(promptIdx1) {
   const item = promptStatus[promptIdx1 - 1];
@@ -129,8 +144,8 @@ function markFailed(promptIdx1) {
     item.state = "failed";
     //runningCount = Math.max(0, runningCount - 1);
     failedCount += 1;
-    if(failedCount>3){
-      inputSlotMax.value =1;
+    if (failedCount > 3) {
+      inputSlotMax.value = 1;
     }
     logMessage(`⚠️ Prompt #${promptIdx1} không tạo được.`, "warn");
     updateLiveStatus();
@@ -139,10 +154,6 @@ function markFailed(promptIdx1) {
 function updateLiveStatus() {
   const total = promptStatus.length;
   liveStatus.textContent = `Đang chạy: ${runningCount} | Đã xong: ${doneCount}/${total} | Lỗi: ${failedCount}`;
-  // Tiến độ theo kết quả thực tế:
-  // const totalDone = doneCount + failedCount;
-  // const pct = Math.round((totalDone / total) * 100);
-  // progressBar.value = Number.isFinite(pct) ? pct : 0;
 }
 
 /**********************
@@ -163,31 +174,142 @@ async function injectScript(fn, args = []) {
   return result;
 }
 
-/**********************
- * GỬI PROMPT (nguyên thuỷ – dùng trong safeSendOnePrompt)
- **********************/
-function processPromptOnPage(prompt) {
+// THAY TOÀN BỘ HÀM processPromptOnPage CŨ BẰNG HÀM NÀY
+async function processPromptOnPage(prompt, imagePayload) {
+  // Helper nhỏ để chờ
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+
+  // === 1. Tìm & set text prompt ===
   const findInput = () =>
     document.getElementById("PINHOLE_TEXT_AREA_ELEMENT_ID") ||
-    document.querySelector('textarea[aria-label*="prompt" i], textarea[placeholder*="prompt" i], textarea');
+    document.querySelector(
+      'textarea[aria-label*="prompt" i], textarea[placeholder*="prompt" i], textarea'
+    );
 
   const input = findInput();
   if (!input) return { ok: false, reason: "Không tìm thấy ô nhập prompt" };
 
-  const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set
-               || function (v) { this.value = v; };
+  const setter =
+    Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value")?.set ||
+    function (v) { this.value = v; };
   setter.call(input, prompt);
   input.dispatchEvent(new Event("input", { bubbles: true }));
 
+  // === 2. GẮN ẢNH (NẾU CÓ): click nút add → chọn file → crop & save ===
+  if (imagePayload) {
+
+  // 💣 2.0. Xoá TẤT CẢ frame ảnh cũ (nút close như HTML em gửi)
+  try {
+    const snapshot = document.evaluate(
+      "//button[.//div[@data-type='button-overlay'] and .//i[normalize-space()='close']]",
+      document,
+      null,
+      XPathResult.ORDERED_NODE_SNAPSHOT_TYPE,
+      null
+    );
+
+    for (let i = 0; i < snapshot.snapshotLength; i++) {
+      const btn = snapshot.snapshotItem(i);
+      btn.click();
+      await wait(250);   // cho UI kịp xoá frame
+    }
+  } catch (e) {
+    console.warn("Không xoá được frame ảnh cũ:", e);
+  }
+
+  try {
+    const findAddButton = () => {
+      let btn = null;
+
+      // Thử XPATH của Auto-Flow
+      try {
+        btn = document.evaluate(
+          "(//button[.//div[@data-type='button-overlay'] and .//i[text()='add']])[1]",
+          document,
+          null,
+          XPathResult.FIRST_ORDERED_NODE_TYPE,
+          null
+        ).singleNodeValue;
+      } catch (e) {}
+
+      if (!btn) {
+        btn = Array.from(document.querySelectorAll("button")).find((b) => {
+          const txt = (b.textContent || "").toLowerCase();
+          if (txt.includes("thêm khung") || txt.includes("add frame")) return true;
+          const icon = b.querySelector("i, span");
+          return icon && (icon.textContent || "").trim() === "add";
+        });
+      }
+
+      return btn;
+    };
+
+    const addBtn = findAddButton();
+    if (addBtn) {
+      addBtn.click();
+      await wait(1500);
+    }
+
+      // 2.2. Tìm input file mới nhất
+      let fileInputs = document.querySelectorAll('input[type="file"]');
+      if (!fileInputs.length) {
+        console.warn("Không tìm thấy input[file] sau khi bấm nút add.");
+      } else {
+        const fileInput = fileInputs[fileInputs.length - 1];
+
+        const bytes = new Uint8Array(imagePayload.bytes || []);
+        const blob = new Blob([bytes], { type: imagePayload.type || "image/png" });
+        const file = new File(
+          [blob],
+          imagePayload.name || "image.png",
+          { type: imagePayload.type || "image/png" }
+        );
+
+        const dt = new DataTransfer();
+        dt.items.add(file);
+        fileInput.files = dt.files;
+        fileInput.dispatchEvent(new Event("change", { bubbles: true }));
+
+        // Đợi upload xong 1 chút
+        await wait(2000);
+
+        // 2.3. Crop & Save mặc định (KHÔNG chọn tỉ lệ)
+        try {
+          // XPATH nút "Crop and Save"
+          const cropButton = document.evaluate(
+            "//button[.//i[normalize-space()='crop'] or contains(normalize-space(),'Crop and Save')]",
+            document,
+            null,
+            XPathResult.FIRST_ORDERED_NODE_TYPE,
+            null
+          ).singleNodeValue;
+
+          if (cropButton) {
+            cropButton.click();
+            await wait(800); // chờ modal đóng
+          }
+        } catch (e) {
+          console.error("Lỗi khi xử lý crop & save:", e);
+        }
+      }
+    } catch (e) {
+      console.error("Không thể auto click & attach ảnh:", e);
+    }
+  }
+
+  // === 3. TÌM VÀ CLICK NÚT GENERATE ===
   function findGenerateButton() {
+    // Nút có chữ "Tạo"
     let btn = Array.from(document.querySelectorAll("button"))
-      .find(b => (b.innerText || "").trim() === "Tạo");
+      .find((b) => (b.innerText || "").trim() === "Tạo");
     if (btn) return btn;
 
+    // Icon arrow_forward
     const icon = Array.from(document.querySelectorAll("button i, button span"))
-      .find(el => (el.textContent || "").trim().includes("arrow_forward"));
+      .find((el) => (el.textContent || "").trim().includes("arrow_forward"));
     if (icon) return icon.closest("button");
 
+    // Fallback XPATH cũ
     try {
       const node = document.evaluate(
         '//*[@id="__next"]/div[2]/div/div/div[2]/div/div[1]/div[2]/div/div[2]/div[2]/button[2]',
@@ -206,13 +328,18 @@ function processPromptOnPage(prompt) {
   if (!btn) return { ok: false, reason: "Không tìm thấy nút Generate" };
   if (btn.disabled) return { ok: false, reason: "Nút Generate đang bị khóa" };
 
-  ["pointerdown", "mousedown", "mouseup", "click"].forEach(type => {
-    const ev = new MouseEvent(type, { bubbles: true, cancelable: true, view: window });
+  ["pointerdown", "mousedown", "mouseup", "click"].forEach((type) => {
+    const ev = new MouseEvent(type, {
+      bubbles: true,
+      cancelable: true,
+      view: window,
+    });
     btn.dispatchEvent(ev);
   });
 
   return { ok: true };
 }
+
 
 /**********************
  * ĐỌC TRẠNG THÁI SLOT
@@ -287,9 +414,7 @@ function getSlotsStatus(indices) {
   return result;
 }
 
-/**********************
- * ÁNH XẠ PROMPT
- **********************/
+
 function buildNormMap() {
   const map = new Map();
   for (const p of promptStatus) {
@@ -319,68 +444,36 @@ function findPromptIndexByText(promptText) {
   return null;
 }
 
-/**********************
- * RATE LIMITER + SAFE SEND (backoff & retry)
- **********************/
-const RateLimiter = (() => {
-  let nextAvailableAt = 0;
-  let backoffMs = 5000;        // 5s khởi điểm
-  const maxBackoffMs = 60000;  // 60s
-  const minBackoffMs = 3000;   // 3s
 
-  return {
-    async wait() {
-      const now = Date.now();
-      if (now < nextAvailableAt) {
-        await sleep(nextAvailableAt - now);
-      }
-    },
-    on429() {
-      backoffMs = Math.min(maxBackoffMs, Math.max(minBackoffMs, backoffMs * 2));
-      nextAvailableAt = Date.now() + backoffMs;
-    },
-    onSuccess() {
-      backoffMs = Math.max(minBackoffMs, Math.floor(backoffMs * 0.7));
-    },
-    cooldown(ms) {
-      nextAvailableAt = Date.now() + ms;
+
+async function safeSendOnePrompt(prompt, idx1, imageFile = null) {
+  let imagePayload = null;
+
+  if (imageFile) {
+    try {
+      const buf = await imageFile.arrayBuffer();
+      imagePayload = {
+        name: imageFile.name,
+        type: imageFile.type,
+        bytes: Array.from(new Uint8Array(buf)),
+      };
+    } catch (e) {
+      logMessage(`⚠️ Không đọc được file ảnh cho prompt #${idx1}: ${e.message}`, "warn");
     }
-  };
-})();
+  }
 
-/** Gửi prompt an toàn, có retry/backoff khi nghi 429 */
-async function safeSendOnePrompt(prompt, idx1, attempt = 1, maxAttempts = 3) {
-  await RateLimiter.wait();
-  const res = await injectScript(processPromptOnPage, [prompt]);
+  const res = await injectScript(processPromptOnPage, [prompt, imagePayload]);
 
   if (res?.ok) {
     markRunning(idx1);
-    logMessage(`🚀 Đã gửi prompt #${idx1} (lần ${attempt})`, "success");
-    RateLimiter.onSuccess();
+    logMessage(`🚀 Đã gửi prompt #${idx1}`, "success");
     return true;
-  }
-
-  const reason = (res?.reason || "").toLowerCase();
-  const maybe429 =
-    reason.includes("bị khóa") ||
-    reason.includes("too many") ||
-    reason.includes("quá nhiều") ||
-    reason.includes("limit");
-
-  if (maybe429 && attempt < maxAttempts) {
-    logMessage(`⏳ Nghi rate limit (429). Backoff rồi thử lại prompt #${idx1}…`, "warn");
-    RateLimiter.on429();
-    await jitteredSleep(4000, 0.5);
-    return safeSendOnePrompt(prompt, idx1, attempt + 1, maxAttempts);
   }
 
   logMessage(`⚠️ Lỗi gửi prompt #${idx1}: ${res?.reason || "Không rõ"}`, "warn");
   return false;
 }
 
-/**********************
- * CORE: REFILL + VÒNG LẶP CHÍNH (KHÔNG repeatEach)
- **********************/
 async function runWithRefill(prompts, startIdx0 = 0) {
   initPromptStatus(prompts, startIdx0);
 
@@ -388,12 +481,24 @@ async function runWithRefill(prompts, startIdx0 = 0) {
   let queuedPtr = 0;        // prompt chưa gửi
   let activeRenders = 0;    // slot đang bận
 
-  async function topUpToCapacity() {
-    while (!stopRequested && activeRenders < inputSlotMax.value && queuedPtr < list.length) {
+  const getMaxSlots = () => {
+    const n = parseInt(inputSlotMax.value || "1", 10);
+    return Number.isFinite(n) && n > 0 ? n : 1;
+  };
 
+  async function topUpToCapacity() {
+    while (!stopRequested && activeRenders < getMaxSlots() && queuedPtr < list.length) {
       const text = list[queuedPtr];
       const idx1 = startIdx0 + queuedPtr + 1;
-      const ok = await safeSendOnePrompt(text, idx1);
+
+      // Ảnh tương ứng: ảnh thứ idx1-1, nếu không có thì thôi
+      let imgFile = null;
+        if (imageFiles.length > 0) {
+          // quay vòng theo số prompt
+          imgFile = imageFiles[(idx1 - 1) % imageFiles.length];
+        }
+
+      const ok = await safeSendOnePrompt(text, idx1, imgFile);
       if (ok) {
         queuedPtr += 1;
         activeRenders += 1;
@@ -404,9 +509,11 @@ async function runWithRefill(prompts, startIdx0 = 0) {
       await jitteredSleep(GAP_BETWEEN_SEND_MS, 0.35);
     }
   }
+
   await topUpToCapacity();
   while (!stopRequested && (queuedPtr < list.length || activeRenders > 0)) {
-    const checkCount = Math.max(1, Math.min(inputSlotMax.value, activeRenders));
+    const maxSlots = getMaxSlots();
+    const checkCount = Math.max(1, Math.min(maxSlots, activeRenders));
     const indices = Array.from({ length: checkCount }, (_, i) => i + 1);
 
     let statuses = {};
@@ -444,7 +551,7 @@ async function runWithRefill(prompts, startIdx0 = 0) {
       await topUpToCapacity();
     }
 
-    if (!finishedSlots && !(queuedPtr < list.length && activeRenders < inputSlotMax.value)) {
+    if (!finishedSlots && !(queuedPtr < list.length && activeRenders < maxSlots)) {
       await sleep(POLL_INTERVAL_MS);
     }
   }
@@ -455,7 +562,7 @@ async function runWithRefill(prompts, startIdx0 = 0) {
     return false;
   } else {
     liveStatus.textContent = "Đã render xong tất cả prompt.";
-    logMessage(`🎉 Render xong. 📊 Thành công ${doneCount}, Thất bại ${failedCount}.`, "success");
+    logMessage(`Render xong. Thành công ${doneCount}, Thất bại ${failedCount}.`, "success");
     // progressBar.value = 100;
     return true;
   }
@@ -476,7 +583,7 @@ async function runSequentialDownload_Legacy(opts = {}) {
     maxIndex: 9999,
     scrollStep: 800,
     waitMenuMs: 300,
-    waitItemMs: 3000,       // ⬆ tăng timeout hợp lý (bản cũ 150ms gần như luôn timeout)
+    waitItemMs: 3000,
     afterClickDelay: 200,
     betweenItemsDelay: 150,
     ...opts,
@@ -501,7 +608,7 @@ async function runSequentialDownload_Legacy(opts = {}) {
 
         const SCROLL_STEP = userOpts.scrollStep || 800;
         const WAIT_MENU_MS = userOpts.waitMenuMs || 300;
-        const WAIT_ITEM_MS = userOpts.waitItemMs || 3000; // tổng timeout tìm item
+        const WAIT_ITEM_MS = userOpts.waitItemMs || 3000;
         const AFTER_CLICK_DELAY = userOpts.afterClickDelay || 200;
         const BETWEEN_ITEMS_DELAY = userOpts.betweenItemsDelay || 150;
 
@@ -513,7 +620,6 @@ async function runSequentialDownload_Legacy(opts = {}) {
         }
 
         function getScrollContainer() {
-          // Tìm container có scroll; fallback document.scrollingElement
           const firstIndexed = document.querySelector('[data-index]');
           let n = firstIndexed && firstIndexed.parentElement;
           while (n) {
@@ -525,16 +631,13 @@ async function runSequentialDownload_Legacy(opts = {}) {
         }
 
         async function ensureIndexLoaded(scroller, index) {
-          // Cuộn dần để thấy node có data-index = index, trong giới hạn thời gian
           const start = Date.now();
           for (;;) {
             const node = document.querySelector(`[data-index="${index}"]`);
             if (node) return node;
 
-            // Cuộn xuống từng bước
             scroller.scrollBy({ top: SCROLL_STEP, behavior: "auto" });
 
-            // Nếu đã cuối danh sách -> coi như hết
             const atBottom = Math.abs(scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop) < 2;
             if (atBottom) return null;
 
@@ -545,7 +648,7 @@ async function runSequentialDownload_Legacy(opts = {}) {
 
         async function jumpToStartIndex(scroller, startIndex) {
           const maybe = document.querySelector(`[data-index="${startIndex}"]`) ||
-                        (await ensureIndexLoaded(scroller, startIndex));
+            (await ensureIndexLoaded(scroller, startIndex));
           if (!maybe) return false;
           maybe.scrollIntoView({ block: "center", behavior: "auto" });
           await sleep(200);
@@ -555,7 +658,6 @@ async function runSequentialDownload_Legacy(opts = {}) {
         function findVariantsWithin(indexNode) {
           const videos = Array.from(indexNode.querySelectorAll('video[src], video'));
           function findDownloadButtonFor(videoEl) {
-            // Lần theo vài cấp cha để khoanh vùng menu
             let scope = videoEl.closest('[class]') || indexNode;
             for (let i = 0; i < 4 && scope && scope !== indexNode; i++) {
               scope = scope.parentElement;
@@ -563,10 +665,11 @@ async function runSequentialDownload_Legacy(opts = {}) {
             scope = scope || indexNode;
 
             const candidates = Array.from(scope.querySelectorAll('button[aria-haspopup="menu"], [role="button"]'));
-            // Ưu tiên nút có chữ "download"
             return (
               candidates.find((btn) => /download/i.test(btn.textContent || "")) ||
-              candidates.find((btn) => (btn.getAttribute("aria-label") || "").toLowerCase().includes("download")) ||
+              candidates.find((btn) =>
+                (btn.getAttribute("aria-label") || "").toLowerCase().includes("download")
+              ) ||
               null
             );
           }
@@ -578,7 +681,9 @@ async function runSequentialDownload_Legacy(opts = {}) {
         async function waitForMenuOpen() {
           const start = Date.now();
           for (;;) {
-            const items = Array.from(document.querySelectorAll('[role="menuitem"], [role="menu"] [role="menuitem"]'));
+            const items = Array.from(
+              document.querySelectorAll('[role="menuitem"], [role="menu"] [role="menuitem"]')
+            );
             if (items.length) return items;
             if (Date.now() > start + WAIT_MENU_MS) return null;
             await sleep(80);
@@ -588,7 +693,6 @@ async function runSequentialDownload_Legacy(opts = {}) {
         function pickMenuItem(menuItems, preferredList) {
           const textOf = (el) => (el.textContent || "").trim().toLowerCase();
 
-          // Thử khớp độ phân giải (chấp nhận "720", "720p", "1080", "1080p", …)
           for (const res of preferredList) {
             const needle = String(res).toLowerCase();
             const found = menuItems.find((mi) => {
@@ -598,12 +702,10 @@ async function runSequentialDownload_Legacy(opts = {}) {
             if (found) return found;
           }
 
-          // fallback: item chứa "download"
           const anyDownload = menuItems.find((mi) => textOf(mi).includes("download"));
           return anyDownload || menuItems[0] || null;
         }
 
-        // ====== Luồng chính ======
         const visitedVideoSrc = new Set();
         const scroller = getScrollContainer();
 
@@ -626,7 +728,6 @@ async function runSequentialDownload_Legacy(opts = {}) {
           if (!variants.length) {
             LOG(`Index #${index}: không có biến thể.`);
             indicesDone++;
-            // vẫn cuộn tiếp để lộ item sau
             scroller.scrollBy({ top: SCROLL_STEP, behavior: "auto" });
             await sleep(120);
             continue;
@@ -639,7 +740,6 @@ async function runSequentialDownload_Legacy(opts = {}) {
             const src =
               video.getAttribute("src") ||
               video.currentSrc ||
-              // fallback theo index/biến thể để tránh double-click cùng phần tử
               `index${index}-var${vi + 1}`;
 
             if (visitedVideoSrc.has(src)) {
@@ -679,7 +779,6 @@ async function runSequentialDownload_Legacy(opts = {}) {
         LOG(`✅ Hoàn tất: OK=${ok}, FAIL=${fail}, Từ index=${START_INDEX}`);
         return { ok, fail, indicesDone, startIndex: START_INDEX };
       },
-      // 🔁 Truyền đúng tham số đã chuẩn hoá vào context trang
       [mergedOpts]
     );
 
@@ -690,10 +789,6 @@ async function runSequentialDownload_Legacy(opts = {}) {
     liveStatus.textContent = "Lỗi khi tải.";
   }
 }
-
-
-
-
 
 /**********************
  * KHỞI CHẠY & SỰ KIỆN NÚT
@@ -723,16 +818,14 @@ async function startAutomation() {
   updateLiveStatus();
 
   logMessage(
-  `Chế độ: tối đa ${inputSlotMax.value} slot song song. Nghỉ ~${GAP_BETWEEN_SEND_MS}ms giữa lần gửi. ` +
-  `Auto tải sau khi render: ${autoSequentialEnabled ? "BẬT" : "TẮT"}. ` +
-  `Bắt đầu từ prompt #${startIndex0 + 1}.`,
-  "system"
-);
-
+    `Chế độ: tối đa ${inputSlotMax.value} slot song song. Nghỉ ~${GAP_BETWEEN_SEND_MS}ms giữa lần gửi. ` +
+    `Auto tải sau khi render: ${autoSequentialEnabled ? "BẬT" : "TẮT"}. ` +
+    `Bắt đầu từ prompt #${startIndex0 + 1}.`,
+    "system"
+  );
 
   try {
     const finished = await runWithRefill(lines, startIndex0);
-    // Nếu muốn tự động tải tuần tự sau khi render xong:
     if (finished && !stopRequested && autoSequentialEnabled) {
       logMessage("⬇️ Tự động tải tuần tự sau khi render xong (đang bắt đầu)…", "system");
       await runSequentialDownload_Legacy({ startIndex: 1, preferredResolutions: ["720"] });
@@ -760,18 +853,15 @@ btnDownload?.addEventListener("click", async () => {
 });
 
 
-/**********************
- * LISTENER
- **********************/
 chrome.runtime.onMessage.addListener((request) => {
-  if (request.type === 'log') {
-    logMessage(request.msg, request.level || 'info');
+  if (request.type === "log") {
+    logMessage(request.msg, request.level || "info");
   }
-  if (request.type === 'download_finished') {
-    if (typeof resetState === 'function') {
-      resetState(typeof i18n === 'function' ? i18n('reset_completed') : 'Hoàn tất');
+  if (request.type === "download_finished") {
+    if (typeof resetState === "function") {
+      resetState(typeof i18n === "function" ? i18n("reset_completed") : "Hoàn tất");
     } else {
-      logMessage('🏁 Tải tuần tự: hoàn tất.', 'success');
+      logMessage("🏁 Tải tuần tự: hoàn tất.", "success");
     }
   }
 });
@@ -783,21 +873,16 @@ chrome.storage?.sync?.get({ autoSequentialEnabled: false }, (cfg) => {
 });
 
 autoDownloadToggle?.addEventListener("change", (e) => {
-    autoSequentialEnabled = !!e.target.checked;
-    chrome.storage?.sync?.set({ autoSequentialEnabled });
-    logMessage(
-      autoSequentialEnabled
-        ? "🟢 Đã bật: tự tải tuần tự sau khi render xong."
-        : "⚪️ Đã tắt: không tự tải sau khi render.",
-      "info"
-    );
-  });
+  autoSequentialEnabled = !!e.target.checked;
+  chrome.storage?.sync?.set({ autoSequentialEnabled });
+  logMessage(
+    autoSequentialEnabled
+      ? "🟢 Đã bật: tự tải tuần tự sau khi render xong."
+      : "⚪️ Đã tắt: không tự tải sau khi render.",
+    "info"
+  );
+});
 
-/**********************
- * IMPORT PROMPT TỪ FILE .TXT
- **********************/
-const uploadBtn = $("#uploadPromptButton");
-const fileInput = $("#fileInput");
 
 uploadBtn?.addEventListener("click", () => fileInput?.click());
 fileInput?.addEventListener("change", async (e) => {
@@ -805,6 +890,22 @@ fileInput?.addEventListener("change", async (e) => {
   if (!file) return;
   const text = await file.text();
   txtPrompts.value = text;
-  const count = text.split("\n").map(s=>s.trim()).filter(Boolean).length;
-  logMessage(`📄 Đã nạp ${count} dòng prompt từ file.`, "info");
+  const count = text.split("\n").map((s) => s.trim()).filter(Boolean).length;
+  logMessage(`Đã nạp ${count} dòng prompt từ file.`, "info");
+});
+
+
+imageUploadBtn?.addEventListener("click", () => imageInput?.click());
+
+imageInput?.addEventListener("change", (e) => {
+  imageFiles = Array.from(e.target.files || []);
+  if (!imageFiles.length) {
+    if (imageUploadStatus) imageUploadStatus.textContent = "";
+    return;
+  }
+
+  if (imageUploadStatus) {
+    imageUploadStatus.textContent = `Đã chọn ${imageFiles.length} ảnh.`;
+  }
+  logMessage(`Đã chọn ${imageFiles.length} ảnh để dùng kèm prompt.`, "info");
 });
