@@ -1,0 +1,19 @@
+{
+  "manifest_version": 3,
+  "name": "Auto Flow By FMC",
+  "version": "1.1.0",
+  "description": "Auto Flow Veo 3",
+  "permissions": ["sidePanel", "activeTab", "scripting", "storage", "tabs"],
+  "host_permissions": ["https://labs.google/fx/*"],
+  "background": { "service_worker": "background.js" },
+  "side_panel": { "default_path": "sidepanel.html" },
+  "icons": {
+    "16": "images/icon16.png",
+    "48": "images/icon48.png",
+    "128": "images/icon128.png"
+  },
+  "web_accessible_resources": [
+    { "resources": ["images/logo.png"], "matches": ["<all_urls>"] }
+  ],
+  "action": { "default_title": "Open Auto Flow" }
+}

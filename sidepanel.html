@@ -1,0 +1,354 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Auto Flow By FMC — Dashboard</title>
+  <!--
+    Lưu ý quan trọng:
+    - Giữ NGUYÊN các id để sidepanel.js hiện tại hoạt động bình thường.
+    - Chỉ thay đổi cấu trúc & CSS cho trải nghiệm chuyên nghiệp hơn.
+  -->
+  <style>
+    /* =============================
+       HỆ MÀU & TOKEN THIẾT KẾ
+       ============================= */
+    :root {
+      /* Light theme (mặc định) */
+      --bg: #f7f8fa;
+      --surface: #ffffff;
+      --surface-2: #f2f4f7;
+      --text: #101828;
+      --text-muted: #475467;
+      --border: #e5e7eb;
+      --accent: #2563eb; /* xanh doanh nghiệp */
+      --accent-600: #1d4ed8;
+      --accent-50: #eef2ff;
+      --success: #16a34a;
+      --warning: #d97706;
+      --error: #dc2626;
+      --radius: 12px;
+      --radius-sm: 10px;
+      --shadow-sm: 0 1px 2px rgba(16, 24, 40, 0.06), 0 1px 1px rgba(16, 24, 40, 0.04);
+      --shadow-md: 0 10px 15px -3px rgba(16, 24, 40, 0.1), 0 4px 6px -2px rgba(16, 24, 40, 0.05);
+      --ring: 0 0 0 3px rgba(37, 99, 235, 0.15);
+      --focus: 2px solid #93c5fd;
+      --font: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, "Inter", sans-serif;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --bg: #0b1220;
+        --surface: #0f172a;
+        --surface-2: #0b1427;
+        --text: #e5e7eb;
+        --text-muted: #94a3b8;
+        --border: #1f2a44;
+        --accent: #60a5fa;
+        --accent-600: #3b82f6;
+        --accent-50: #0b1730;
+        --success: #22c55e;
+        --warning: #f59e0b;
+        --error: #ef4444;
+        --ring: 0 0 0 3px rgba(96, 165, 250, 0.25);
+        --focus: 2px solid #60a5fa;
+        --shadow-sm: 0 1px 2px rgba(0,0,0,0.4);
+        --shadow-md: 0 10px 15px -3px rgba(0,0,0,0.35), 0 4px 6px -2px rgba(0,0,0,0.3);
+      }
+    }
+
+    /* =============================
+       RESET & LAYOUT CƠ BẢN
+       ============================= */
+    * { box-sizing: border-box; }
+    html, body { height: 100%; }
+    body {
+      margin: 0;
+      font-family: var(--font);
+      color: var(--text);
+      background: linear-gradient(180deg, var(--bg), var(--surface-2));
+      display: flex;
+      flex-direction: column;
+      width: 100%;
+      max-width: 560px; /* phù hợp side panel */
+    }
+
+    .container {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      padding: 16px;
+      height: 100vh;
+    }
+
+    /* =============================
+       THANH TIÊU ĐỀ / APP BAR
+       ============================= */
+    .appbar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      padding: 12px 14px;
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-sm);
+    }
+    .brand {
+      width: 40px; height: 40px; border-radius: 10px;
+      display: grid; place-items: center; color: white;
+      background: linear-gradient(135deg, var(--accent), var(--accent-600));
+      font-weight: 700; font-size: 18px;
+    }
+    .titlewrap { display: flex; flex-direction: column; }
+    .title { margin: 0; font-size: 16px; font-weight: 700; letter-spacing: .2px; }
+    .subtitle { margin: 0; font-size: 12px; color: var(--text-muted); }
+
+    /* =============================
+       CARD CHUNG
+       ============================= */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-sm);
+      padding: 14px;
+    }
+    .card h4 {
+      margin: 0 0 12px;
+      font-size: 14px; letter-spacing: .2px;
+      display: flex; align-items: center; gap: 8px;
+    }
+
+    /* =============================
+       KHU PROMPT
+       ============================= */
+    .prompt-actions { display: flex; gap: 8px; justify-content: space-between; align-items: center; }
+    .prompt-actions .right { display: flex; gap: 8px; }
+
+    label { font-size: 12px; color: var(--text-muted); }
+
+    textarea, input[type="number"], select, input[type="text"] {
+      width: 100%;
+      background: var(--surface-2);
+      border: 1px solid var(--border);
+      color: var(--text);
+      border-radius: var(--radius-sm);
+      padding: 10px 12px;
+      font-size: 13px;
+      outline: none;
+      transition: box-shadow .2s, border-color .2s, background .2s;
+    }
+    textarea:focus, input:focus, select:focus {
+      border-color: var(--accent-600);
+      box-shadow: var(--ring);
+      background: #fff0;
+    }
+
+    #prompts { height: 140px; resize: vertical; }
+
+    .upload-hidden { display: none; }
+
+    /* =============================
+       LƯỚI CÀI ĐẶT
+       ============================= */
+    .settings-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px 12px;
+    }
+    .control { display: flex; flex-direction: column; gap: 6px; }
+    .inline {
+      display: flex; align-items: center; gap: 8px;
+      padding: 10px 12px; border: 1px solid var(--border);
+      border-radius: var(--radius-sm);
+      background: var(--surface-2);
+    }
+    .inline input[type="checkbox"] { width: 16px; height: 16px; }
+
+    /* =============================
+       NÚT / BUTTON
+       ============================= */
+    .actions { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+    button {
+      appearance: none;
+      border: 1px solid var(--border);
+      background: var(--surface);
+      color: var(--text);
+      padding: 10px 12px;
+      border-radius: 10px;
+      font-weight: 600;
+      font-size: 13px;
+      display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+      cursor: pointer; transition: transform .06s ease, box-shadow .2s ease, background .2s;
+      box-shadow: var(--shadow-sm);
+    }
+    button:hover { box-shadow: var(--shadow-md); }
+    button:active { transform: translateY(1px) scale(0.99); }
+    button:focus-visible { outline: var(--focus); }
+    button:disabled { opacity: .5; cursor: not-allowed; }
+
+    #mainActionButton { background: linear-gradient(180deg, var(--accent), var(--accent-600)); color: #fff; border-color: transparent; }
+    #stopButton { background: #fff; color: var(--error); border-color: #fecaca; }
+    #downloadButton { background: #fff; color: var(--success); border-color: #bbf7d0; }
+
+    /* =============================
+       STATUS & PROGRESS
+       ============================= */
+    .status {
+      display: flex; flex-direction: column; gap: 10px;
+    }
+    .progress {
+      width: 100%; height: 10px; border-radius: 999px; background: var(--surface-2);
+      border: 1px solid var(--border); overflow: hidden;
+    }
+    .progress > .bar { height: 100%; width: 0%; background: linear-gradient(90deg, var(--accent), var(--accent-600)); transition: width .3s ease; }
+
+    .statusline {
+      display: flex; align-items: center; justify-content: space-between;
+      font-size: 12px; color: var(--text-muted);
+    }
+    #liveStatus { font-weight: 600; color: var(--text); }
+
+    /* =============================
+       LOG
+       ============================= */
+    #logDisplay {
+      height: 180px; overflow: auto; padding: 12px;
+      background: var(--surface-2); border: 1px solid var(--border);
+      border-radius: var(--radius-sm); font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+      font-size: 12px; line-height: 1.45;
+    }
+    .log-entry { display: grid; grid-template-columns: 88px 1fr; gap: 8px; margin-bottom: 6px; }
+    .log-timestamp { color: var(--text-muted); }
+    .log-message { color: var(--text); }
+    .log-system .log-message { color: var(--accent-600); font-weight: 700; }
+    .log-success .log-message { color: var(--success); }
+    .log-warn .log-message { color: var(--warning); font-weight: 600; }
+    .log-error .log-message { color: var(--error); font-weight: 700; }
+
+    /* =============================
+       OVERLAY SAI TRANG
+       ============================= */
+    #wrong-page-interface {
+      display: none; position: fixed; inset: 0; z-index: 50;
+      backdrop-filter: blur(2px);
+      background: rgba(16, 24, 40, .45);
+      align-items: center; justify-content: center;
+    }
+    .overlay {
+      width: min(520px, calc(100% - 32px));
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      box-shadow: var(--shadow-md);
+      padding: 20px;
+      display: grid; gap: 12px; text-align: center;
+    }
+    .overlay .icon { font-size: 40px; }
+    .overlay p { margin: 0; color: var(--text-muted); }
+    .overlay button { justify-self: center; min-width: 160px; background: linear-gradient(180deg, var(--accent), var(--accent-600)); color: #fff; border-color: transparent; }
+
+    /* =============================
+       TIỆN ÍCH NHỎ
+       ============================= */
+    .muted { color: var(--text-muted); }
+    .row { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .row-3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 10px; }
+    .sr-only { position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; overflow: hidden; clip: rect(0, 0, 0, 0); border: 0; }
+  </style>
+</head>
+<body>
+  <!-- Overlay: cảnh báo sai trang -->
+  <div id="wrong-page-interface" role="dialog" aria-modal="true" aria-labelledby="wrongPageTitle">
+    <div class="overlay">
+      <div class="icon" aria-hidden="true">⚠️</div>
+      <h3 id="wrongPageTitle" class="title">Cảnh báo</h3>
+      <p>Tool chỉ chạy trên trang Google Flow.</p>
+      <button id="navigateToFlowButton" type="button" title="Chuyển đến Flow">Chuyển đến Flow</button>
+    </div>
+  </div>
+
+  <div class="container" id="main-interface">
+    <!-- Appbar -->
+    <header class="appbar" role="banner">
+      <div class="brand" aria-hidden="true">AF</div>
+      <div class="titlewrap">
+        <h1 class="title">Auto Flow by FMC</h1>
+        <p class="subtitle">Bảng điều khiển • Nhanh • Ổn định • Chuyên nghiệp</p>
+      </div>
+    </header>
+
+    <!-- Prompt -->
+    <section class="card" aria-labelledby="section-prompts">
+      <h4 id="section-prompts">🧠 Danh sách prompt</h4>
+      <div class="prompt-actions" style="margin-bottom:8px;">
+        <label for="prompts" class="muted">Mỗi dòng là một prompt.</label>
+        <div class="right">
+          <button id="uploadPromptButton" type="button" title="Nhập từ file (.txt)">Nhập từ file (.txt)</button>
+        </div>
+      </div>
+      <input id="fileInput" class="upload-hidden" type="file" accept=".txt" />
+      <textarea id="prompts" placeholder="Nhập prompt tại đây...&#10; Mỗi prompt 1 dòng"></textarea>
+    </section>
+
+    <!-- Cài đặt -->
+    <section class="card" aria-labelledby="section-settings">
+      <h4 id="section-settings">⚙️ Cài đặt</h4>
+      <div class="settings-grid" role="group" aria-label="Tuỳ chọn cài đặt">
+        <div class="control">
+          <label for="startFromInput">Bắt đầu từ prompt #</label>
+          <input id="startFromInput" type="number" min="1" value="1" inputmode="numeric" />
+        </div>
+        <div class="control">
+          <label for="SlotMaxFromInput">SlotMax prompt #</label>
+          <input id="SlotMaxFromInput" type="number" min="1" max="5" value="2" inputmode="numeric" />
+        </div>
+        <div class="control" style="grid-column: 1 / -1;">
+          <div class="inline">
+            <input id="autoDownloadToggle" type="checkbox" aria-describedby="autoDlHint" />
+            <label for="autoDownloadToggle" style="margin:0;">Tự tải tuần tự sau khi render xong</label>
+          </div>
+          <small id="autoDlHint" class="muted">Khi bật, hệ thống sẽ lần lượt tải các kết quả ngay khi hoàn tất render.</small>
+        </div>
+      </div>
+    </section>
+
+    <!-- Hành động -->
+    <section class="card" aria-labelledby="section-actions">
+      <h4 id="section-actions">🚀 Thao tác nhanh</h4>
+      <div class="actions">
+        <button id="mainActionButton" type="button" title="Bắt đầu">
+          <span aria-hidden="true">▶️</span>
+          <span>Chạy</span>
+        </button>
+        <button id="stopButton" type="button" title="Dừng" disabled>
+          <span aria-hidden="true">⏹️</span>
+          <span>Dừng</span>
+        </button>
+        <button id="downloadButton" type="button" title="Tải tuần tự">
+          <span aria-hidden="true">⬇️</span>
+          <span>Tải</span>
+        </button>
+      </div>
+    </section>
+
+    <!-- Trạng thái -->
+    <section class="card status" aria-labelledby="section-status">
+      <h4 id="section-status">📊 Trạng thái</h4>
+      <div class="progress" aria-hidden="true"><div class="bar" id="progressBarBar"></div></div>
+      <div class="statusline">
+        <div class="muted">Tình trạng:</div>
+        <div id="liveStatus">Sẵn sàng</div>
+      </div>
+    </section>
+
+    <!-- Log -->
+    <section class="card" aria-labelledby="section-log">
+      <h4 id="section-log">📄 Log chi tiết</h4>
+      <div id="logDisplay" aria-live="polite" aria-atomic="false"></div>
+    </section>
+  </div>
+  <script src="sidepanel.js"></script>
+</body>
+</html>
