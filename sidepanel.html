@@ -286,6 +286,7 @@
         <label for="prompts" class="muted">Mỗi dòng là một prompt.</label>
         <div class="right">
           <button id="uploadPromptButton" type="button" title="Nhập từ file (.txt)">Nhập từ file (.txt)</button>
+          <input id="fileInput" type="file" accept=".txt" style="display:none">
           <button id="uploadImageButton" title="Chọn thư mục ảnh">📁 Chọn ảnh</button>
         </div>
         <!-- Upload Img -->
@@ -294,7 +295,7 @@
       <input id="imageInput" type="file" accept="image/*" multiple style="display:none">
       <span id="imageUploadStatus" class="small-hint"></span>
       <div id="imageFolderPreview" style="margin-top:8px; display:flex; flex-wrap:wrap; gap:6px;">
-        
+
       </div>
       <textarea id="prompts" placeholder="Nhập prompt tại đây...&#10; Mỗi prompt 1 dòng"></textarea>
     </section>

@@ -174,9 +174,7 @@ async function injectScript(fn, args = []) {
   return result;
 }
 
-// THAY TOÀN BỘ HÀM processPromptOnPage CŨ BẰNG HÀM NÀY
 async function processPromptOnPage(prompt, imagePayload) {
-  // Helper nhỏ để chờ
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
   // === 1. Tìm & set text prompt ===
@@ -195,10 +193,11 @@ async function processPromptOnPage(prompt, imagePayload) {
   setter.call(input, prompt);
   input.dispatchEvent(new Event("input", { bubbles: true }));
 
-  // === 2. GẮN ẢNH (NẾU CÓ): click nút add → chọn file → crop & save ===
-  if (imagePayload) {
+  // === 2. GẮN ẢNH (NẾU CÓ): xoá frame cũ → click nút add → chọn file → crop & save ===
+if (imagePayload) {
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
-  // 💣 2.0. Xoá TẤT CẢ frame ảnh cũ (nút close như HTML em gửi)
+  // 2.0: Xoá tất cả frame / overlay có nút close
   try {
     const snapshot = document.evaluate(
       "//button[.//div[@data-type='button-overlay'] and .//i[normalize-space()='close']]",
@@ -211,7 +210,7 @@ async function processPromptOnPage(prompt, imagePayload) {
     for (let i = 0; i < snapshot.snapshotLength; i++) {
       const btn = snapshot.snapshotItem(i);
       btn.click();
-      await wait(250);   // cho UI kịp xoá frame
+      await wait(250);
     }
   } catch (e) {
     console.warn("Không xoá được frame ảnh cũ:", e);
@@ -221,10 +220,10 @@ async function processPromptOnPage(prompt, imagePayload) {
     const findAddButton = () => {
       let btn = null;
 
-      // Thử XPATH của Auto-Flow
+      // Thử XPATH chuẩn
       try {
         btn = document.evaluate(
-          "(//button[.//div[@data-type='button-overlay'] and .//i[text()='add']])[1]",
+          "(//button[.//div[@data-type='button-overlay'] and .//i[normalize-space()='add']])[1]",
           document,
           null,
           XPathResult.FIRST_ORDERED_NODE_TYPE,
@@ -232,6 +231,7 @@ async function processPromptOnPage(prompt, imagePayload) {
         ).singleNodeValue;
       } catch (e) {}
 
+      // Fallback text / icon
       if (!btn) {
         btn = Array.from(document.querySelectorAll("button")).find((b) => {
           const txt = (b.textContent || "").toLowerCase();
@@ -245,18 +245,36 @@ async function processPromptOnPage(prompt, imagePayload) {
     };
 
     const addBtn = findAddButton();
-    if (addBtn) {
+    if (!addBtn) {
+      console.warn("Không tìm thấy nút add image.");
+    } else {
+      // Đếm số input[file] trước khi bấm
+      const beforeInputs = document.querySelectorAll('input[type="file"]').length;
+
       addBtn.click();
-      await wait(1500);
-    }
 
-      // 2.2. Tìm input file mới nhất
-      let fileInputs = document.querySelectorAll('input[type="file"]');
-      if (!fileInputs.length) {
-        console.warn("Không tìm thấy input[file] sau khi bấm nút add.");
+      // 🔁 Chờ input[type=file] xuất hiện (tối đa 8s)
+      let fileInput = null;
+      const maxWaitMs = 8000;
+      const start = Date.now();
+
+      while (Date.now() - start < maxWaitMs) {
+        const all = document.querySelectorAll('input[type="file"]');
+        if (all.length > beforeInputs) {
+          fileInput = all[all.length - 1];
+          break;
+        }
+        if (!fileInput && all.length > 0) {
+          // fallback: nếu đã tồn tại sẵn từ trước
+          fileInput = all[all.length - 1];
+        }
+        if (fileInput) break;
+        await wait(200);
+      }
+
+      if (!fileInput) {
+        console.warn("Không tìm thấy input[file] sau khi bấm nút add (hết thời gian chờ).");
       } else {
-        const fileInput = fileInputs[fileInputs.length - 1];
-
         const bytes = new Uint8Array(imagePayload.bytes || []);
         const blob = new Blob([bytes], { type: imagePayload.type || "image/png" });
         const file = new File(
@@ -268,15 +286,17 @@ async function processPromptOnPage(prompt, imagePayload) {
         const dt = new DataTransfer();
         dt.items.add(file);
         fileInput.files = dt.files;
-        fileInput.dispatchEvent(new Event("change", { bubbles: true }));
 
-        // Đợi upload xong 1 chút
-        await wait(2000);
+        const changeEv = new Event("change", { bubbles: true });
+        fileInput.dispatchEvent(changeEv);
 
-        // 2.3. Crop & Save mặc định (KHÔNG chọn tỉ lệ)
-        try {
-          // XPATH nút "Crop and Save"
-          const cropButton = document.evaluate(
+        // 🔁 Chờ nút Crop and Save xuất hiện (tối đa 10s)
+        const maxWaitCropMs = 10000;
+        const startCrop = Date.now();
+        let cropButton = null;
+
+        while (Date.now() - startCrop < maxWaitCropMs) {
+          cropButton = document.evaluate(
             "//button[.//i[normalize-space()='crop'] or contains(normalize-space(),'Crop and Save')]",
             document,
             null,
@@ -284,18 +304,23 @@ async function processPromptOnPage(prompt, imagePayload) {
             null
           ).singleNodeValue;
 
-          if (cropButton) {
-            cropButton.click();
-            await wait(800); // chờ modal đóng
-          }
-        } catch (e) {
-          console.error("Lỗi khi xử lý crop & save:", e);
+          if (cropButton) break;
+          await wait(300);
+        }
+
+        if (cropButton) {
+          cropButton.click();
+          await wait(800); // cho modal đóng hẳn
+        } else {
+          console.warn("Không tìm thấy nút Crop and Save (hết thời gian chờ).");
         }
       }
-    } catch (e) {
-      console.error("Không thể auto click & attach ảnh:", e);
     }
+  } catch (e) {
+    console.error("Không thể auto click & attach ảnh:", e);
   }
+}
+
 
   // === 3. TÌM VÀ CLICK NÚT GENERATE ===
   function findGenerateButton() {
