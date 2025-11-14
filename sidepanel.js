@@ -247,71 +247,86 @@ if (imagePayload) {
     if (!addBtn) {
       console.warn("Không tìm thấy nút add image.");
     } else {
-      // Đếm số input[file] trước khi bấm
       const beforeInputs = document.querySelectorAll('input[type="file"]').length;
 
       addBtn.click();
+      await wait(500); // chờ panel/selector mở ra
 
-      // 🔁 Chờ input[type=file] xuất hiện (tối đa 8s)
-      let fileInput = null;
-      const maxWaitMs = 8000;
-      const start = Date.now();
+      const existingAssetBtn = document.evaluate(
+        "(" +
+          "//span[contains(normalize-space(.),'Một thành phần nội dung nghe nhìn')]" +
+          "/ancestor::button[1]" +
+        ")[1]",
+        document,
+        null,
+        XPathResult.FIRST_ORDERED_NODE_TYPE,
+        null
+      ).singleNodeValue;
 
-      while (Date.now() - start < maxWaitMs) {
-        const all = document.querySelectorAll('input[type="file"]');
-        if (all.length > beforeInputs) {
-          fileInput = all[all.length - 1];
-          break;
-        }
-        if (!fileInput && all.length > 0) {
-          // fallback: nếu đã tồn tại sẵn từ trước
-          fileInput = all[all.length - 1];
-        }
-        if (fileInput) break;
-        await wait(200);
-      }
-
-      if (!fileInput) {
-        console.warn("Không tìm thấy input[file] sau khi bấm nút add (hết thời gian chờ).");
+      if (existingAssetBtn) {
+        existingAssetBtn.click();
+        await wait(800);
       } else {
-        const bytes = new Uint8Array(imagePayload.bytes || []);
-        const blob = new Blob([bytes], { type: imagePayload.type || "image/png" });
-        const file = new File(
-          [blob],
-          imagePayload.name || "image.png",
-          { type: imagePayload.type || "image/png" }
-        );
 
-        const dt = new DataTransfer();
-        dt.items.add(file);
-        fileInput.files = dt.files;
+        let fileInput = null;
+        const maxWaitMs = 8000;
+        const start = Date.now();
 
-        const changeEv = new Event("change", { bubbles: true });
-        fileInput.dispatchEvent(changeEv);
-
-        // 🔁 Chờ nút Crop and Save xuất hiện (tối đa 10s)
-        const maxWaitCropMs = 10000;
-        const startCrop = Date.now();
-        let cropButton = null;
-
-        while (Date.now() - startCrop < maxWaitCropMs) {
-          cropButton = document.evaluate(
-            "//button[.//i[normalize-space()='crop'] or contains(normalize-space(),'Crop and Save')]",
-            document,
-            null,
-            XPathResult.FIRST_ORDERED_NODE_TYPE,
-            null
-          ).singleNodeValue;
-
-          if (cropButton) break;
-          await wait(300);
+        while (Date.now() - start < maxWaitMs) {
+          const all = document.querySelectorAll('input[type="file"]');
+          if (all.length > beforeInputs) {
+            fileInput = all[all.length - 1];
+            break;
+          }
+          if (!fileInput && all.length > 0) {
+            // fallback: nếu đã tồn tại sẵn từ trước
+            fileInput = all[all.length - 1];
+          }
+          if (fileInput) break;
+          await wait(200);
         }
 
-        if (cropButton) {
-          cropButton.click();
-          await wait(800); // cho modal đóng hẳn
+        if (!fileInput) {
+          console.warn("Không tìm thấy input[file] sau khi bấm nút add (hết thời gian chờ).");
         } else {
-          console.warn("Không tìm thấy nút Crop and Save (hết thời gian chờ).");
+          const bytes = new Uint8Array(imagePayload.bytes || []);
+          const blob = new Blob([bytes], { type: imagePayload.type || "image/png" });
+          const file = new File(
+            [blob],
+            imagePayload.name || "image.png",
+            { type: imagePayload.type || "image/png" }
+          );
+
+          const dt = new DataTransfer();
+          dt.items.add(file);
+          fileInput.files = dt.files;
+
+          const changeEv = new Event("change", { bubbles: true });
+          fileInput.dispatchEvent(changeEv);
+
+          const maxWaitCropMs = 10000;
+          const startCrop = Date.now();
+          let cropButton = null;
+
+          while (Date.now() - startCrop < maxWaitCropMs) {
+            cropButton = document.evaluate(
+              "//button[.//i[normalize-space()='crop'] or contains(normalize-space(),'Crop and Save')]",
+              document,
+              null,
+              XPathResult.FIRST_ORDERED_NODE_TYPE,
+              null
+            ).singleNodeValue;
+
+            if (cropButton) break;
+            await wait(300);
+          }
+
+          if (cropButton) {
+            cropButton.click();
+            await wait(800); // cho modal đóng hẳn
+          } else {
+            console.warn("Không tìm thấy nút Crop and Save (hết thời gian chờ).");
+          }
         }
       }
     }
@@ -319,6 +334,7 @@ if (imagePayload) {
     console.error("Không thể auto click & attach ảnh:", e);
   }
 }
+
 
   // === 3. TÌM VÀ CLICK NÚT GENERATE ===
   async function waitForGenerateButton(timeout = 3000) {
