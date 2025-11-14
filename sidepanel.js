@@ -321,7 +321,6 @@ if (imagePayload) {
   }
 }
 
-
   // === 3. TÌM VÀ CLICK NÚT GENERATE ===
   function findGenerateButton() {
     // Nút có chữ "Tạo"
