@@ -124,7 +124,6 @@ function markRunning(promptIdx1) {
   if (item && item.state === "queued") {
     item.state = "running";
     runningCount += 1;
-    logMessage(`▶️ Đang chạy prompt #${promptIdx1}`, "info");
     updateLiveStatus();
   }
 }
@@ -322,52 +321,65 @@ if (imagePayload) {
 }
 
   // === 3. TÌM VÀ CLICK NÚT GENERATE ===
-  function findGenerateButton() {
-    // Nút có chữ "Tạo"
-    let btn = Array.from(document.querySelectorAll("button"))
-      .find((b) => (b.innerText || "").trim() === "Tạo");
-    if (btn) return btn;
+  async function waitForGenerateButton(timeout = 3000) {
+    const start = Date.now();
 
-    // Icon arrow_forward
-    const icon = Array.from(document.querySelectorAll("button i, button span"))
-      .find((el) => (el.textContent || "").trim().includes("arrow_forward"));
-    if (icon) return icon.closest("button");
+    function getCandidates() {
+      const btns = Array.from(document.querySelectorAll("button"));
 
-    // Fallback XPATH cũ
-    try {
-      const node = document.evaluate(
-        '//*[@id="__next"]/div[2]/div/div/div[2]/div/div[1]/div[2]/div/div[2]/div[2]/button[2]',
-        document,
-        null,
-        XPathResult.FIRST_ORDERED_NODE_TYPE,
-        null
-      ).singleNodeValue;
-      if (node) return node;
-    } catch {}
+      // Theo text "Tạo"
+      let can = btns.filter(b =>
+        (b.innerText || "").trim() === "Tạo"
+      );
 
-    return null;
+      // Theo icon → arrow_forward
+      if (!can.length) {
+        const icons = Array.from(document.querySelectorAll("button i, button span"))
+          .filter(el => (el.textContent || "").trim().includes("arrow_forward"))
+          .map(el => el.closest("button"))
+          .filter(Boolean);
+        can = icons;
+      }
+
+      // Lọc nút fake (Google thường có 2 lớp button)
+      can = can.filter(b =>
+        !b.hasAttribute("disabled") &&
+        b.getAttribute("aria-disabled") !== "true" &&
+        b.offsetWidth > 0 &&
+        b.offsetHeight > 0 &&
+        window.getComputedStyle(b).opacity !== "0" &&
+        window.getComputedStyle(b).pointerEvents !== "none"
+      );
+
+      return can[0] || null;
+    }
+
+    let btn = getCandidates();
+    while (!btn) {
+      if (Date.now() - start >= timeout) return null;
+      await new Promise(r => setTimeout(r, 100));
+      btn = getCandidates();
+    }
+
+    return btn;
   }
 
-  const btn = findGenerateButton();
-  if (!btn) return { ok: false, reason: "Không tìm thấy nút Generate" };
-  if (btn.disabled) return { ok: false, reason: "Nút Generate đang bị khóa" };
 
-  ["pointerdown", "mousedown", "mouseup", "click"].forEach((type) => {
-    const ev = new MouseEvent(type, {
-      bubbles: true,
-      cancelable: true,
-      view: window,
-    });
-    btn.dispatchEvent(ev);
-  });
+
+  const btn = await waitForGenerateButton();
+
+  if (!btn)
+    return { ok: false, reason: "Không tìm thấy nút Generate (timeout)" };
+
+  // Nếu sẵn sàng: click
+  ["pointerdown", "mousedown", "mouseup", "click"].forEach(type =>
+    btn.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true }))
+  );
 
   return { ok: true };
 }
 
 
-/**********************
- * ĐỌC TRẠNG THÁI SLOT
- **********************/
 function getSlotsStatus(indices) {
   const hasAddToScene = (root) => {
     const btns = root.querySelectorAll("button");
@@ -919,17 +931,10 @@ fileInput?.addEventListener("change", async (e) => {
 });
 
 
-imageUploadBtn?.addEventListener("click", () => imageInput?.click());
+imageUploadBtn?.addEventListener("click", () => imageInput?.click(), { once: true });
+imageInput?.addEventListener("change", onImageChange, { once: true });
 
-imageInput?.addEventListener("change", (e) => {
-  imageFiles = Array.from(e.target.files || []);
-  if (!imageFiles.length) {
-    if (imageUploadStatus) imageUploadStatus.textContent = "";
-    return;
-  }
-
-  if (imageUploadStatus) {
+function onImageChange(e) {
+    imageFiles = Array.from(e.target.files || []);
     imageUploadStatus.textContent = `Đã chọn ${imageFiles.length} ảnh.`;
-  }
-  logMessage(`Đã chọn ${imageFiles.length} ảnh để dùng kèm prompt.`, "info");
-});
+}
