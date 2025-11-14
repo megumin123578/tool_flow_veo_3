@@ -1,6 +1,4 @@
-/**********************
- * TIỆN ÍCH CHUNG
- **********************/
+
 const $ = (sel) => document.querySelector(sel);
 const logBox = $("#logDisplay");
 // const progressBar = $("#progressBar");
@@ -31,11 +29,9 @@ let imageFiles = [];
 
 let stopRequested = false;
 
-// — CÓ THỂ TINH CHỈNH TỪ UI NẾU MUỐN —
 let GAP_BETWEEN_SEND_MS = 3000;   // nghỉ giữa mỗi lần GỬI prompt (ms)
 let POLL_INTERVAL_MS = 1200;      // nghỉ giữa mỗi lần POLL (ms)
 
-/** Jittered sleep để tránh nhịp đồng bộ (±tỷ lệ) */
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 function jitteredSleep(baseMs, jitterRatio = 0.3) {
   const jitter = baseMs * jitterRatio;
@@ -192,7 +188,7 @@ async function processPromptOnPage(prompt, imagePayload) {
   setter.call(input, prompt);
   input.dispatchEvent(new Event("input", { bubbles: true }));
 
-  // === 2. GẮN ẢNH (NẾU CÓ): xoá frame cũ → click nút add → chọn file → crop & save ===
+  // === 2. GẮN ẢNH: xoá frame cũ → click nút add → chọn file → crop & save ===
 if (imagePayload) {
   const wait = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -335,7 +331,6 @@ if (imagePayload) {
   }
 }
 
-
   // === 3. TÌM VÀ CLICK NÚT GENERATE ===
   async function waitForGenerateButton(timeout = 3000) {
     const start = Date.now();
@@ -357,7 +352,7 @@ if (imagePayload) {
         can = icons;
       }
 
-      // Lọc nút fake (Google thường có 2 lớp button)
+      // Lọc nút fake
       can = can.filter(b =>
         !b.hasAttribute("disabled") &&
         b.getAttribute("aria-disabled") !== "true" &&
@@ -543,7 +538,6 @@ async function runWithRefill(prompts, startIdx0 = 0) {
       const text = list[queuedPtr];
       const idx1 = startIdx0 + queuedPtr + 1;
 
-      // Ảnh tương ứng: ảnh thứ idx1-1, nếu không có thì thôi
       let imgFile = null;
         if (imageFiles.length > 0) {
           // quay vòng theo số prompt
